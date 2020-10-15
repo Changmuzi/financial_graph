@@ -1,0 +1,89 @@
+# -*- coding: utf-8 -*-
+"""
+@author: Changmu
+"""
+
+import os
+import pandas as pd
+import importlib,sys
+from neo4j import GraphDatabase
+
+dir = os.path.dirname(os.path.realpath(__file__))
+# 将当前路径添加为导报路径列表中
+sys.path.append(os.path.dirname(dir))
+importlib.reload(sys)
+
+
+def getpath(filename):
+	dirpath = os.path.join(os.path.dirname(dir), 'output/data_neo4j', filename)
+	for x in os.listdir(dirpath):
+		if x[-4:] == '.csv':
+			return os.path.join(dirpath, x)
+	
+	
+def graph_execute(cql, parameters):
+	'''
+	cql执行函数
+	输入cql语句，返回查询结果
+	'''
+	result = []
+	with graph_db.session() as session:
+		for x in session.run(cql, parameters):
+			result.append(x)
+	return result
+		
+		
+def create_node(label):
+	'''
+	输入节点label，返回节点生成cql语句
+	'''
+	LABEL = label
+	FILEPATH = getpath(label)
+	# 根据csv表头获取所有的属性值
+	df = pd.read_csv(FILEPATH, sep='\t')
+	col_names = df.columns.values.tolist()
+	col_names = ['{0}: line.{1}'.format(x,x) for x in col_names]
+	PROPERTY = ', '.join(col_names)
+	cql_create = 'CREATE INDEX ON :{LABEL}(uid)'.format(LABEL=LABEL)
+	cql = '''
+	LOAD CSV WITH HEADERS FROM
+	'file://{FILEPATH}' AS line
+	FIELDTERMINATOR '{SEP}'
+	CREATE (:{LABEL} {{{PROPERTY}}});
+	'''.format(LABEL=LABEL,
+			   FILEPATH=FILEPATH,
+			   SEP=r'\t',
+			   PROPERTY=PROPERTY)
+			   
+	try:
+		graph_execute(cql_create,{})
+	except Exception as e:
+		print('节点{}创建索引失败'.format(LABEL))
+		print(e)
+
+	try:
+		graph_execute(cql,{})
+		print('节点{}创建成功'.format(LABEL))
+	except Exception as e:
+		print('节点{}创建失败'.format(LABEL))
+		print(e)
+
+
+
+if __name__ == '__main__':
+	HOST = '127.0.0.1'
+	PORT = 7687
+	USER = 'neo4j'
+	PASSWORD = 'neo4jforbigdata'
+	graph_db = GraphDatabase.driver('neo4j://%s:%s' % (HOST, PORT), auth = (USER, PASSWORD))
+	# 删除图谱所有节点和关系
+	try:
+		graph_execute('match (n) detach delete n',{})
+		print('图谱清空成功')
+	except Exception as e:
+		print(e)
+	# 创建节点
+	nodes = ['company', 'industry', 'person', 'product']
+	for label in nodes:
+		create_node(label)
+	# 创建关系
